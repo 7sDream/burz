@@ -1,7 +1,16 @@
 [package]
 name = "burz"
 version = "0.1.0"
+authors = ["7sDream <i@7sdre.am>"]
 edition = "2021"
+description = "Kaiheila bot framework"
+document = "https://docs.rs/burz"
+readme = "README.md"
+homepage = "https://github.com/7sDream/burz"
+repository = "https://github.com/7sDream/burz"
+license = "MIT"
+keywords = ["async", "bot", "kaiheila"]
+categories = ["api-bindings", "asynchronous", "network-programming"]
 
 # ===== dependencies =====
 
