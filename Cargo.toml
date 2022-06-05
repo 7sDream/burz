@@ -1,0 +1,78 @@
+[package]
+name = "burz"
+version = "0.1.0"
+edition = "2021"
+
+# ===== dependencies =====
+
+# for error handling
+[dependencies.snafu]
+version = "0.7"
+
+# for enum functional auto generate
+[dependencies.enum-as-inner]
+version = "0.5"
+
+# for http(s) request
+[dependencies.reqwest]
+version = "0.11"
+features = ["gzip", "deflate"]
+
+# for buffer operation
+[dependencies.bytes]
+version = "1"
+
+# for ser/de message/event type
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+# for parse json
+[dependencies.serde_json]
+version = "1"
+
+# for parse and construct gateway url
+[dependencies.url]
+version = "2"
+
+# for async networking
+[dependencies.tokio]
+version = "1"
+default_features = false
+features = [
+    "macros", # for select
+    "time", # for timeout control
+    "sync", # for channels
+]
+
+# for async stream/sink
+[dependencies.futures-util]
+version = "0.3"
+features = ["sink"]
+
+# for websocket protocol
+[dependencies.tokio-tungstenite]
+version = "0.17"
+features = ["rustls-tls-native-roots"]
+
+# for decompress compressed message
+[dependencies.miniz_oxide]
+version = "0.5"
+features = ["simd"]
+
+[dependencies.log]
+version = "0.4"
+
+# ===== Dev Dependencies =====
+
+[dev-dependencies.tokio]
+version = "1"
+features = ["full"]
+
+[dev-dependencies.pretty_env_logger]
+version = "0.4"
+
+
+# ===== Examples =====
+[[example]]
+name = "bot"
