@@ -2,7 +2,7 @@ use burz::Bot;
 
 #[tokio::main]
 async fn main() {
-    pretty_env_logger::init();
+    pretty_env_logger::init_timed();
 
     let token = std::env::var("BOT_TOKEN")
         .map_err(|_| {
