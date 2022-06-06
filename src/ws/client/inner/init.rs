@@ -44,7 +44,13 @@ impl ClientInner<ClientStateInit> {
         mut self,
         mut gateway: GatewayURLInfo,
     ) -> ClientInner<ClientStateGateway> {
+        log::debug!("Try resume from {:?}", self.state.resume);
+
         std::mem::swap(&mut gateway.resume, &mut self.state.resume);
+
+        log::debug!("Updated gateway url {}", gateway.url());
+
+        log::debug!("Move to gateway state");
 
         ClientInner {
             state: ClientStateGateway { gateway },

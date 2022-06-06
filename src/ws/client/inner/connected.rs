@@ -66,7 +66,7 @@ impl ClientInner<ClientStateConnected> {
         WaitHelloError,
     > {
         let mut message_stream = MessageStreamSink::new(ws, compress).filter(|result| {
-            let skip = matches!(result, Err(e) if !e.need_stop());
+            let skip = matches!(result, Err(e) if !e.is_fatal());
             if skip {
                 log::warn!(
                     "Message stream error happened but ignored: {}",
@@ -77,8 +77,12 @@ impl ClientInner<ClientStateConnected> {
         });
 
         let deadline = Instant::now() + Duration::from_secs(6);
+
+        log::debug!("Waiting hello message, timeout tick: {:?}", deadline);
+
         let message = tokio::select! {
             _ = tokio::time::sleep_until(deadline) => {
+                log::warn!("Wait hello timeout");
                 return error::Timeout.fail();
             }
             result = message_stream.next() => {
@@ -86,9 +90,13 @@ impl ClientInner<ClientStateConnected> {
             }
         };
 
+        log::debug!("Wait hello get a {} message", message.type_name());
+
         ensure!(matches!(message, Message::Hello(_)), error::MessageNotHello,);
 
         let hello = message.into_hello().unwrap(); // checked in last line
+
+        log::debug!("Hello message data: {:?}", hello);
 
         ensure!(
             hello.data.code == 0,
@@ -112,8 +120,12 @@ impl ClientInner<ClientStateConnected> {
         let mut resume = self.state.gateway.resume.take().unwrap_or_default();
         resume.session_id = session_id;
 
+        log::debug!("New resume argument: {:?}", resume);
+
         let (sink, stream) = message_stream.split();
         let (sender, event_stream) = EventStreamSender::new(resume);
+
+        log::debug!("Move to streaming state");
 
         ClientInner {
             state: ClientStateStreaming {
@@ -136,6 +148,11 @@ impl ClientInner<ClientStateConnected> {
             {
                 Ok((m, s)) => (m, s),
                 Err(err) => {
+                    log::warn!(
+                        "Reconnect state wait hello failed: {}, send event stream error and stop",
+                        err
+                    );
+
                     sender.send_err(err).await;
                     return;
                 }
@@ -144,7 +161,11 @@ impl ClientInner<ClientStateConnected> {
         let mut resume = self.state.gateway.resume.take().unwrap_or_default();
         resume.session_id = session_id;
 
+        log::debug!("New resume argument: {:?}", resume);
+
         let (sink, stream) = message_stream.split();
+
+        log::debug!("Move to streaming state");
 
         ClientInner {
             state: ClientStateStreaming {

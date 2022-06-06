@@ -7,21 +7,32 @@ use tokio_tungstenite::tungstenite as websocket;
 use super::{Message, ParseMessageError};
 use crate::ws::client::WebsocketClient;
 
+/// Error when read/write message stream/sink
 #[derive(Debug, Snafu)]
 #[snafu(module(error), context(suffix(false)))]
-pub(crate) enum MessageStreamSinkError {
+pub enum MessageStreamSinkError {
+    /// underlying websocket stream broken
     #[snafu(display("underlying websocket stream broken: {source}"))]
-    Websocket { source: websocket::Error },
+    Websocket {
+        /// source error
+        source: websocket::Error,
+    },
 
+    /// received an non-binary frame
     #[snafu(display("received a non-binary type frame"))]
     NotBinaryFrame,
 
+    /// parse binary message data failed
     #[snafu(display("parse frame to message failed: {source}"))]
-    ParseMessageFailed { source: ParseMessageError },
+    ParseMessageFailed {
+        /// source error
+        source: ParseMessageError,
+    },
 }
 
 impl MessageStreamSinkError {
-    pub fn need_stop(&self) -> bool {
+    /// Check if this error will make the stream/sink stop
+    pub fn is_fatal(&self) -> bool {
         match self {
             Self::Websocket { .. } => true,
             Self::NotBinaryFrame => false,
@@ -32,13 +43,18 @@ impl MessageStreamSinkError {
     }
 }
 
+/// Kaiheila websocket message stream/sink
 #[derive(Debug)]
-pub(crate) struct MessageStreamSink {
+pub struct MessageStreamSink {
     ws: WebsocketClient,
     compress: bool,
 }
 
 impl MessageStreamSink {
+    /// Construct a new stream with underlying websocket connection.
+    ///
+    /// the `compress` argument controls if the stream will decompress binary data
+    /// before parse it to message.
     pub fn new(ws: WebsocketClient, compress: bool) -> Self {
         Self { ws, compress }
     }

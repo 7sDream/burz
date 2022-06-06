@@ -1,3 +1,5 @@
+//! Kaiheila websocket client
+
 mod inner;
 
 pub use inner::{

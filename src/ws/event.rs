@@ -1,8 +1,10 @@
+//! Kaiheila websocket events in [Event](super::message::Message::Event) message type.
+
 use serde::{Deserialize, Serialize};
 
 /// Event data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct EventData {
+pub struct EventData {
     /// serial number
     pub sn: u64,
 

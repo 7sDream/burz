@@ -7,11 +7,13 @@ use futures_util::{
 };
 use tokio::{sync::watch, time::Instant};
 
-use super::{pinger::PingWorker, EventStreamErrorKind, EventStreamSender};
+use super::{ping::PingWorker, EventStreamErrorKind, EventStreamSender};
 use crate::{
     api::types::GatewayURLInfo,
     ws::{
-        client::inner::{timeout::ClientStateTimeout, ClientInner},
+        client::inner::{
+            timeout::ClientStateTimeout, ClientInner, STREAMING_STATE_PONG_TIMEOUT_MAX_COUNT,
+        },
         message::{Message, MessageStreamSinkError},
     },
 };
@@ -34,24 +36,24 @@ where
         + 'static,
 {
     async fn streaming_background(mut state: ClientStateStreaming<S>) {
+        log::debug!("Streaming background task start");
+
         let (sn_notifier, sn_watcher) = watch::channel(state.sender.resume.sn);
-        let (timeout_tx, mut timeout_rx) = watch::channel(None);
+        let (pong_timeout_notifier, mut pong_timeout_watcher) = watch::channel(None);
 
         state.sender.sn_notifier = Some(sn_notifier);
 
-        log::debug!("Streaming background task start {:?}", state);
+        let mut pw_event_sender = state.sender.clone();
+        pw_event_sender.sn_watcher = Some(sn_watcher);
+        let pw = PingWorker::new(pw_event_sender, state.sink, pong_timeout_notifier);
 
-        let mut pinger_event_sender = state.sender.clone();
-        pinger_event_sender.sn_watcher = Some(sn_watcher);
-        let pinger = PingWorker::new(pinger_event_sender, state.sink, timeout_tx);
+        let pw_handler = tokio::spawn(pw.run());
 
-        let pinger_handler = tokio::spawn(pinger.run());
-
-        let mut ping_timeout: Option<Instant> = None;
-        let mut ping_timeout_count = 0u8;
+        let mut pong_timeout_tick: Option<Instant> = None;
+        let mut pong_timeout_count = 0;
 
         loop {
-            let ping_timeout_clock = if let Some(tick) = ping_timeout {
+            let pong_timeout = if let Some(tick) = pong_timeout_tick {
                 tokio::time::sleep_until(tick).boxed()
             } else {
                 future::pending().boxed()
@@ -60,14 +62,27 @@ where
             tokio::select! {
                 biased;
 
-                // ping timeout
-                _ = ping_timeout_clock => {
-                    ping_timeout_count += 1;
-                    ping_timeout = None;
-                    if ping_timeout_count >= 2 { // timeout twice, goto timeout state
+                // pong timeout
+                _ = pong_timeout => {
+                    pong_timeout_count += 1;
+                    log::warn!("Pong timeout, counts {}", pong_timeout_count);
+
+                    log::trace!("Reset pong timeout tick to inf");
+                    pong_timeout_tick = None;
+
+                    if pong_timeout_count >= STREAMING_STATE_PONG_TIMEOUT_MAX_COUNT {
+                        log::warn!("Reached pong time out count limit, move to timeout state");
+
+                        log::trace!("Prepare move to timeout state");
+
                         drop(state.sender.sn_notifier.take());
-                        let sink = pinger_handler.await.unwrap();
+
+                        log::trace!("Waiting ping worker to stop");
+
+                        let sink = pw_handler.await.unwrap();
                         state.sender.sn_notifier = None;
+
+                        log::debug!("Move to timeout state");
 
                         let timeout_inner = ClientInner{
                             state: ClientStateTimeout::<S> {
@@ -82,16 +97,16 @@ where
                     }
                 }
 
-                // new ping message sent, update ping timeout clock
-                next_ping_timeout = timeout_rx.changed() => {
-                    if let Err(err) = next_ping_timeout {
-                        log::debug!("Streaming background task find pinger stopped due to timeout rx returning error: {}", err);
+                // new ping message sent, update ping pong timeout clock
+                watch_result = pong_timeout_watcher.changed() => {
+                    if let Err(err) = watch_result {
+                        log::debug!("Find ping worker stopped due to pong timeout watcher returning error: {}", err);
                         break
                     }
 
-                    ping_timeout = *timeout_rx.borrow();
+                    pong_timeout_tick = *pong_timeout_watcher.borrow();
 
-                    log::trace!("Next pong timeout tick: {:?}", ping_timeout);
+                    log::trace!("Next pong timeout tick: {:?}", pong_timeout_tick);
                 }
 
                 // new message received
@@ -101,37 +116,38 @@ where
                         Ok(message) => {
                             log::trace!("Received new {} message", message.type_name());
 
-                            // reset ping timeout
-                            ping_timeout = None;
-                            ping_timeout_count = 0;
-
-                            log::trace!("Reset pong timeout to inf");
+                            log::trace!("Reset pong timeout tick to inf and clean timeout count");
+                            pong_timeout_tick = None;
+                            pong_timeout_count = 0;
 
                             match message {
                                 Message::Event(data) => {
+                                    log::trace!("Received event sn = {}", data.sn);
+
                                     if state.sender.send_event(data.event).await {
                                         log::trace!("Send event to event stream success");
                                     } else {
-                                        log::trace!("Send event to receive stream failed, means receive side dropped, exit");
+                                        log::debug!("Send event to event stream failed, means receive side dropped, stop");
                                         // event receive side dropped, stop produce
                                         break;
                                     }
 
                                     // update event sn
                                     if state.sender.update_sn(data.sn) {
-                                        log::trace!("Update sn to {} success", data.sn);
+                                        log::trace!("Update sn to {} success", state.sender.resume.sn);
                                     } else {
-                                        log::debug!("Streaming background task find pinger stopped due to update sn notify failed");
-                                        // pinger stopped, only when write ping failed, so we stop too
+                                        log::debug!("Find ping worker stopped due to update sn failed, stop");
                                         break
                                     }
                                 }
                                 Message::Reconnect(data) => {
-                                    // reconnect received, stop
+                                    log::trace!("Send error to event stream");
                                     state.sender.send_err(EventStreamErrorKind::Reconnect {
                                         code: data.data.code,
                                         message: data.data.err,
                                     }).await;
+
+                                    log::debug!("Stop");
                                     break;
                                 }
                                 Message::ResumeACK(_) => {
@@ -142,12 +158,14 @@ where
                             }
                         }
                         Err(err) => {
-                            log::debug!("Streaming background task find message stream broken when receive message: {}", err);
-                            log::debug!("Send error to event stream");
+                            log::warn!("Find message stream broken when receive message: {}", err);
+
                             let err = EventStreamErrorKind::MessageStream {
                                 source: Box::new(err),
                             };
+                            log::trace!("Send error to event stream");
                             state.sender.send_err(err).await;
+
                             log::debug!("Stop");
                             break;
                         }

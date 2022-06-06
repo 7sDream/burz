@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use super::super::ConnectGatewayError;
 use crate::{
     api::types::GatewayResumeArguments,
-    ws::{message::MessageStreamSinkError, Event, WaitHelloError},
+    ws::{client::WaitHelloError, message::MessageStreamSinkError, Event},
 };
 
 /// Error for event stream

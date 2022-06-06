@@ -1,4 +1,4 @@
-mod pinger;
+mod ping;
 mod sender;
 mod state;
 mod stream;

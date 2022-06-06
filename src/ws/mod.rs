@@ -1,11 +1,9 @@
 //! Kaiheila websocket protocol client implement
 
-mod client;
-mod event;
-pub(crate) mod message;
+pub mod client;
+pub mod event;
+pub mod message;
 
-pub use client::{
-    Client, ConnectGatewayError, EventStream, EventStreamError, EventStreamErrorKind, RunError,
-    WaitHelloError,
-};
+pub use client::Client;
 pub use event::Event;
+pub use message::Message;

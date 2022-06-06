@@ -3,7 +3,10 @@
 use snafu::prelude::*;
 
 use super::api::Error as APIError;
-use super::ws::RunError;
+use super::ws::client::RunError;
+
+/// framework result type
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// framework error type
 #[derive(Debug, Snafu)]

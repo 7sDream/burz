@@ -1,8 +1,7 @@
 use tokio::sync::{mpsc, watch};
 
-use crate::{api::types::GatewayResumeArguments, ws::Event};
-
 use super::{EventStream, EventStreamError, EventStreamErrorKind};
+use crate::{api::types::GatewayResumeArguments, ws::Event};
 
 #[derive(Debug)]
 pub(crate) struct EventStreamSender {
@@ -41,9 +40,13 @@ impl EventStreamSender {
 
 impl EventStreamSender {
     pub fn update_sn(&mut self, val: u64) -> bool {
-        self.resume.sn = val;
-        if let Some(ref notifier) = self.sn_notifier {
-            notifier.send(val).is_ok()
+        if self.resume.sn < val {
+            self.resume.sn = val;
+            if let Some(ref notifier) = self.sn_notifier {
+                notifier.send(val).is_ok()
+            } else {
+                true
+            }
         } else {
             true
         }

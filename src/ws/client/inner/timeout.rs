@@ -1,22 +1,26 @@
 use std::{fmt::Debug, time::Duration};
 
 use futures_util::{
-    future,
     stream::{SplitSink, SplitStream},
-    FutureExt, Sink, SinkExt, Stream, StreamExt,
+    Sink, SinkExt, Stream, StreamExt,
 };
 use snafu::prelude::*;
 use tokio::time::Instant;
 
 use super::{
-    gateway::ClientStateGateway,
     streaming::error,
     streaming::{self, ClientStateStreaming, EventStreamSender},
-    ClientInner, EventStreamErrorKind,
+    ClientInner, ClientStateInit, EventStreamErrorKind,
 };
 use crate::{
     api::types::GatewayURLInfo,
-    ws::message::{Message, MessageStreamSinkError},
+    ws::{
+        client::inner::{
+            PONG_TIMEOUT, TIMEOUT_STATE_SEND_PING_INTERVAL_MAX,
+            TIMEOUT_STATE_SEND_PING_INTERVAL_START,
+        },
+        message::{Message, MessageStreamSinkError},
+    },
 };
 
 pub(crate) struct ClientStateTimeout<S> {
@@ -47,7 +51,7 @@ where
     client.streaming_start();
 }
 
-async fn to_gateway<S>(mut state: ClientStateTimeout<S>)
+async fn to_init_with_gateway<S>(state: ClientStateTimeout<S>)
 where
     S: Sink<Message, Error = MessageStreamSinkError>
         + Stream<Item = Result<Message, MessageStreamSinkError>>
@@ -55,14 +59,14 @@ where
         + Unpin
         + 'static,
 {
-    state.gateway.resume.replace(state.sender.resume.clone());
     let client = ClientInner {
-        state: ClientStateGateway {
-            gateway: state.gateway,
+        state: ClientStateInit {
+            resume: Some(state.sender.resume.clone()),
         },
     };
 
     let client = match client
+        .into_gateway(state.gateway)
         .connect()
         .await
         .context(error::ReConnectGatewayFailed)
@@ -87,75 +91,102 @@ where
         + 'static,
 {
     async fn timeout_background(mut state: ClientStateTimeout<S>) {
-        let mut timeout = None;
+        log::debug!("Timeout background task start");
 
-        let mut time_send_ping = Instant::now() + Duration::from_secs(2);
-        let mut ping_send_count = 0;
+        let pong_timeout_clock = tokio::time::sleep(Duration::from_secs(PONG_TIMEOUT));
+        tokio::pin!(pong_timeout_clock);
+
+        let mut send_ping_delay = 0;
+        let mut send_ping_tick = Instant::now();
 
         loop {
-            let timeout_clock = if let Some(tick) = timeout {
-                tokio::time::sleep_until(tick).boxed()
-            } else {
-                future::pending().boxed()
-            };
-
             tokio::select! {
                 biased;
 
-                _ = timeout_clock => {
-                    to_gateway(state).await;
+                _ = &mut pong_timeout_clock => {
+                    log::warn!("Pong still timeout, reconnect to gateway");
+
+                    log::debug!("Move to init(with gateway) state");
+                    to_init_with_gateway(state).await;
                     break;
                 }
 
-                _ = tokio::time::sleep_until(time_send_ping), if ping_send_count < 2 => {
-                    ping_send_count += 1;
+                _ = tokio::time::sleep_until(send_ping_tick) => {
+                    log::trace!("Send ping with sn {}", state.sender.resume.sn);
+
                     if let Err(err) = state
                     .sink
                     .feed(state.sender.resume.ping())
                     .await
                     .context(streaming::error::MessageStream)
                     {
+                        log::debug!("Find message stream broken when send ping message: {}", err);
+                        log::trace!("Send error to event stream");
                         state.sender.send_err(err).await;
+                        log::trace!("Stop");
                         return;
-                    } else {
-                        timeout = Some(Instant::now() + Duration::from_secs(6));
-                        time_send_ping = Instant::now() + Duration::from_secs(4);
                     }
+
+                    send_ping_delay *= 2;
+                    send_ping_delay = send_ping_delay.clamp(TIMEOUT_STATE_SEND_PING_INTERVAL_START, TIMEOUT_STATE_SEND_PING_INTERVAL_MAX);
+
+                    log::trace!("Next ping in {} seconds", send_ping_delay);
+
+                    send_ping_tick = Instant::now() + Duration::from_secs(send_ping_delay);
                 }
 
                 result = state.stream.next() => {
                     match result.unwrap() {
-                        Ok(message) => match message {
-                            Message::Event(data) => {
-                                // update event sn
-                                state.sender.update_sn(data.sn);
-                                if !state.sender.send_event(data.event).await {
-                                    // event receive side dropped, stop produce
+                        Ok(message) => {
+                            log::trace!("Received new {} message", message.type_name());
+
+                            match message {
+                                Message::Event(data) => {
+                                    log::trace!("Received event sn = {}", data.sn);
+
+                                    if state.sender.send_event(data.event).await {
+                                        log::trace!("Send event to event stream success");
+                                    } else {
+                                        log::debug!("Send event to event stream failed, means receive side dropped, stop");
+                                        break;
+                                    }
+
+                                    state.sender.update_sn(data.sn);
+                                    log::trace!("Update sn to {}", state.sender.resume.sn);
+
+                                    log::info!("Recovery from timeout state");
+                                    log::debug!("Move to streaming state");
+                                    to_streaming(state);
                                     break;
                                 }
+                                Message::Reconnect(data) => {
+                                    log::trace!("Send error to event stream");
+                                    state.sender.send_err(EventStreamErrorKind::Reconnect {
+                                        code: data.data.code,
+                                        message: data.data.err,
+                                    }).await;
 
-                                to_streaming(state);
-                                break;
-                            }
-                            Message::Reconnect(data) => {
-                                // reconnect received, stop
-                                state.sender.send_err(EventStreamErrorKind::Reconnect {
-                                    code: data.data.code,
-                                    message: data.data.err,
-                                }).await;
-                                break;
-                            }
-                            _ => {
-                                to_streaming(state);
-                                break;
+                                    log::debug!("Stop");
+                                    break;
+                                }
+                                _ => {
+                                    log::info!("Recovery from timeout state");
+                                    log::debug!("Move to streaming state");
+                                    to_streaming(state);
+                                    break;
+                                }
                             }
                         }
                         Err(err) => {
-                            // message stream broken, stop
+                            log::warn!("Find message stream broken when receive message: {}", err);
+
                             let err = EventStreamErrorKind::MessageStream {
                                 source: Box::new(err),
                             };
+                            log::trace!("Send error to event stream");
                             state.sender.send_err(err).await;
+
+                            log::debug!("Stop");
                             break;
                         }
                     }

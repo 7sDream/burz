@@ -1,8 +1,10 @@
+//! Kaiheila websocket message types.
+
 mod stream;
 mod types;
 
-pub(crate) use stream::*;
-pub(crate) use types::*;
+pub use stream::{MessageStreamSink, MessageStreamSinkError};
+pub use types::{Hello, OnlyData, Reconnect, ResumeACK, SN};
 
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
@@ -14,12 +16,8 @@ use super::event::EventData;
 
 /// Error when parse binary data as message
 #[derive(Debug, Snafu)]
-#[snafu(
-    visibility(pub(super)),
-    module(parse_message_error_variants),
-    context(suffix(false))
-)]
-pub(crate) enum ParseMessageError {
+#[snafu(visibility(pub(super)), module(error), context(suffix(false)))]
+pub enum ParseMessageError {
     /// Decompress data failed
     #[snafu(display("decompress message failed: {status:?}"))]
     DecompressFailed {
@@ -82,7 +80,7 @@ static MESSAGE_INTERNAL_TYPE_TAG: &str = "__internal_type_tag__";
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner)]
 // serde does not support number tag for now, see: https://github.com/serde-rs/serde/issues/745
 #[serde(tag = "__internal_type_tag__")]
-pub(crate) enum Message {
+pub enum Message {
     /// Event, server -> client
     Event(EventData),
     /// Hello, server -> client
@@ -111,37 +109,35 @@ impl Message {
                 .into();
         }
 
-        let mut value: serde_json::Value = serde_json::from_slice(&buff)
-            .context(parse_message_error_variants::ParseJSONFailed { data: buff.clone() })?;
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&buff).context(error::ParseJSONFailed { data: buff.clone() })?;
 
-        let obj = value.as_object_mut().with_context(|| {
-            parse_message_error_variants::MessageNotObject {
+        let obj = value
+            .as_object_mut()
+            .with_context(|| error::MessageNotObject {
                 json: String::from_utf8_lossy(&buff),
-            }
-        })?;
+            })?;
 
         let s = obj
             .get("s")
-            .with_context(|| parse_message_error_variants::NoMessageType {
+            .with_context(|| error::NoMessageType {
                 json: String::from_utf8_lossy(&buff),
             })?
             .as_i64()
-            .with_context(|| parse_message_error_variants::MessageTypeNotNumber {
+            .with_context(|| error::MessageTypeNotNumber {
                 json: String::from_utf8_lossy(&buff),
             })?;
 
         let type_name = Self::type_number_to_type_name(s)
-            .with_context(|| parse_message_error_variants::UnknownMessageType { t: s })?;
+            .with_context(|| error::UnknownMessageType { t: s })?;
 
         obj.insert(
             MESSAGE_INTERNAL_TYPE_TAG.to_string(),
             serde_json::Value::String(type_name.to_string()),
         );
 
-        serde_json::from_value(value).with_context(|_| {
-            parse_message_error_variants::ParseJSONToTypedMessageFailed {
-                type_name: type_name.to_string(),
-            }
+        serde_json::from_value(value).with_context(|_| error::ParseJSONToTypedMessageFailed {
+            type_name: type_name.to_string(),
         })
     }
 
