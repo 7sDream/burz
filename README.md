@@ -6,7 +6,7 @@
 
 ## TODO
 
-- [ ] Event buffer and reorder
+- [x] Event buffer and reorder
 - [ ] Filter and Command
 - [ ] All HTTP API wrapper
 - [ ] Documents

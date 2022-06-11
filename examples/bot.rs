@@ -11,7 +11,7 @@ use tokio_tungstenite::tungstenite as websocket;
 
 use tokio_tungstenite::WebSocketStream;
 
-async fn fake_gateway_no_pong_process(mut conn: WebSocketStream<TcpStream>) {
+async fn _fake_gateway_no_pong_process(mut conn: WebSocketStream<TcpStream>) {
     let hello = Message::Hello(OnlyData {
         data: Hello {
             code: 0,
@@ -40,7 +40,86 @@ async fn fake_gateway_no_pong_process(mut conn: WebSocketStream<TcpStream>) {
     future::pending().await
 }
 
-async fn fake_gateway_no_pong() {
+async fn _fake_gateway_dup_message(mut conn: WebSocketStream<TcpStream>) {
+    let hello = Message::Hello(OnlyData {
+        data: Hello {
+            code: 0,
+            session_id: Some("x".to_string()),
+        },
+    });
+    conn.feed(websocket::Message::Binary(hello.encode()))
+        .await
+        .unwrap();
+
+    let event = Message::Event(EventData {
+        sn: 1,
+        event: Event::Null,
+    });
+
+    conn.feed(websocket::Message::Binary(event.encode()))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    conn.feed(websocket::Message::Binary(event.encode()))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    conn.feed(websocket::Message::Binary(event.encode()))
+        .await
+        .unwrap();
+
+    future::pending().await
+}
+
+async fn fake_gateway_misordered_message(mut conn: WebSocketStream<TcpStream>) {
+    let hello = Message::Hello(OnlyData {
+        data: Hello {
+            code: 0,
+            session_id: Some("x".to_string()),
+        },
+    });
+    conn.feed(websocket::Message::Binary(hello.encode()))
+        .await
+        .unwrap();
+
+    let mut event = Message::Event(EventData {
+        sn: 3,
+        event: Event::Null,
+    });
+
+    conn.feed(websocket::Message::Binary(event.encode()))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    event.as_event_mut().unwrap().sn = 2;
+    conn.feed(websocket::Message::Binary(event.encode()))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    event.as_event_mut().unwrap().sn = 1;
+    conn.feed(websocket::Message::Binary(event.encode()))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    event.as_event_mut().unwrap().sn = 2;
+    conn.feed(websocket::Message::Binary(event.encode()))
+        .await
+        .unwrap();
+
+    future::pending().await
+}
+
+async fn fake_gateway() {
     let listener = TcpListener::bind("127.0.0.1:7777").await.unwrap();
 
     loop {
@@ -48,7 +127,7 @@ async fn fake_gateway_no_pong() {
 
         let ws_conn = tokio_tungstenite::accept_async(conn).await.unwrap();
 
-        tokio::spawn(fake_gateway_no_pong_process(ws_conn));
+        tokio::spawn(fake_gateway_misordered_message(ws_conn));
     }
 }
 
@@ -63,7 +142,7 @@ async fn main() {
         })
         .unwrap();
 
-    tokio::spawn(fake_gateway_no_pong());
+    tokio::spawn(fake_gateway());
 
     let bot = Bot::new(&token).unwrap();
 

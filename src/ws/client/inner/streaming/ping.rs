@@ -44,18 +44,18 @@ where
             tokio::select! {
                 biased;
 
-                notifier_alive = self.sender.wait_sn_change(), if self.sender.has_sn_watcher() => {
+                notifier_alive = self.sender.wait_sn_change() => {
                     if !notifier_alive {
                         log::debug!("Find sn notifier dead when wait sn update");
                         log::debug!("Stop");
                         break
                     }
-                    log::trace!("Ping worker sn update to {}", self.sender.resume.sn);
+                    log::trace!("Ping worker sn update to {}", self.sender.sn());
                 }
 
                 _ = send_ping_clock => {
-                    log::trace!("Send ping message with sn {}", self.sender.resume.sn);
-                    if let Err(err) = self.sink.feed(self.sender.resume.ping()).await.context(error::MessageStream) {
+                    log::trace!("Send ping message with sn {}", self.sender.sn());
+                    if let Err(err) = self.sink.feed(self.sender.ping()).await.context(error::MessageStream) {
                         log::debug!("Find message stream broken when send ping message: {}", err);
                         log::trace!("Send error to event stream");
                         self.sender.send_err(err).await;

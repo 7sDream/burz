@@ -131,7 +131,7 @@ impl ClientInner<ClientStateConnected> {
             state: ClientStateStreaming {
                 gateway: self.state.gateway,
                 sender,
-                sink,
+                sink: Some(sink),
                 stream,
             },
         }
@@ -171,7 +171,7 @@ impl ClientInner<ClientStateConnected> {
             state: ClientStateStreaming {
                 gateway: self.state.gateway,
                 sender,
-                sink,
+                sink: Some(sink),
                 stream,
             },
         }

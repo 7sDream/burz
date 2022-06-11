@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Event data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventData {
     /// serial number
     pub sn: u64,
@@ -11,6 +11,18 @@ pub struct EventData {
     /// event body
     #[serde(rename = "d")]
     pub event: Event,
+}
+
+impl PartialOrd for EventData {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.sn.partial_cmp(&other.sn)
+    }
+}
+
+impl Ord for EventData {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.sn.cmp(&other.sn)
+    }
 }
 
 /// Event type
