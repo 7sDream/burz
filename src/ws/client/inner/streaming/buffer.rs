@@ -7,7 +7,7 @@ use crate::ws::event::EventData;
 
 #[derive(Debug, Default)]
 pub(crate) struct EventBuffer {
-    exits: HashSet<u64>,
+    exist: HashSet<u64>,
     buffer: BinaryHeap<Reverse<EventData>>,
 }
 
@@ -32,11 +32,11 @@ impl Iterator for EventsCanBeSend<'_> {
 
 impl EventBuffer {
     pub fn put(&mut self, sn: u64, item: EventData) {
-        if item.sn <= sn || self.exits.contains(&item.sn) {
+        if item.sn <= sn || self.exist.contains(&item.sn) {
             log::trace!("Duplicated event {} received, drop it", item.sn);
             return;
         }
-        self.exits.insert(item.sn);
+        self.exist.insert(item.sn);
         self.buffer.push(Reverse(item));
     }
 
@@ -46,7 +46,7 @@ impl EventBuffer {
 
     pub fn pop(&mut self) -> Option<EventData> {
         let item = self.buffer.pop()?;
-        self.exits.remove(&item.0.sn);
+        self.exist.remove(&item.0.sn);
         Some(item.0)
     }
 
