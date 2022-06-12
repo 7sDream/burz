@@ -1,5 +1,7 @@
 # Burz
 
+STATUS: **WIP, DO NOT USE FOR NOW**.
+
 [Kaiheila] bot framework for Rust.
 
 [kaiheila]: https://www.kaiheila.cn/
