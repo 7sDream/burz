@@ -12,7 +12,7 @@ static BASE_URL: &str = "https://www.kaiheila.cn/api/v3";
 static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 /// Kaiheila HTTP API Client
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Client {
     client: reqwest::Client,
 }

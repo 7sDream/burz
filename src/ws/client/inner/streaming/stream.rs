@@ -60,11 +60,11 @@ pub enum EventStreamErrorKind {
 /// Kaiheila websocket event stream
 #[derive(Debug)]
 pub struct EventStream {
-    pub(crate) rx: mpsc::Receiver<Result<Event, EventStreamError>>,
+    pub(crate) rx: mpsc::Receiver<Result<Box<Event>, EventStreamError>>,
 }
 
 impl Stream for EventStream {
-    type Item = Result<Event, EventStreamError>;
+    type Item = Result<Box<Event>, EventStreamError>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,

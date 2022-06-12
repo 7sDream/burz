@@ -1,9 +1,10 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use burz::ws::event::EventData;
 use burz::ws::message::{Hello, Message, OnlyData};
 use burz::ws::Event;
-use burz::Bot;
+use burz::{filter, Bot};
 
 use futures_util::{future, SinkExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -24,7 +25,7 @@ async fn _fake_gateway_no_pong_process(mut conn: WebSocketStream<TcpStream>) {
 
     let event = Message::Event(EventData {
         sn: 1234,
-        event: Event::Null,
+        event: Box::new(Event::default()),
     });
 
     conn.feed(websocket::Message::Binary(event.encode()))
@@ -53,7 +54,7 @@ async fn _fake_gateway_dup_message(mut conn: WebSocketStream<TcpStream>) {
 
     let event = Message::Event(EventData {
         sn: 1,
-        event: Event::Null,
+        event: Box::new(Event::default()),
     });
 
     conn.feed(websocket::Message::Binary(event.encode()))
@@ -88,7 +89,7 @@ async fn fake_gateway_misordered_message(mut conn: WebSocketStream<TcpStream>) {
 
     let mut event = Message::Event(EventData {
         sn: 3,
-        event: Event::Null,
+        event: Box::new(Event::default()),
     });
 
     conn.feed(websocket::Message::Binary(event.encode()))
@@ -144,7 +145,11 @@ async fn main() {
 
     tokio::spawn(fake_gateway());
 
-    let bot = Bot::new(&token).unwrap();
+    let mut bot = Bot::new(&token).unwrap();
+
+    bot.subscribe(filter::all(), |event: Arc<Event>| async move {
+        log::info!("Event: {}", event.content)
+    });
 
     bot.run().await.unwrap();
 }

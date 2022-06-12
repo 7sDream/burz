@@ -1,5 +1,6 @@
 use std::task::Poll;
 
+use bytes::Bytes;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use snafu::prelude::*;
 use tokio_tungstenite::tungstenite as websocket;
@@ -73,9 +74,16 @@ impl Stream for MessageStreamSink {
                 let frame = frame.unwrap().context(error::Websocket)?;
                 let result = match frame {
                     websocket::Message::Binary(data) => {
-                        match Message::decode(data.into(), self.compress) {
+                        let buffer: Bytes = data.into();
+                        match Message::decode(buffer.clone(), self.compress) {
                             Ok(msg) => Ok(msg),
-                            Err(e) => Err(MessageStreamSinkError::ParseMessageFailed { source: e }),
+                            Err(e) => {
+                                log::trace!(
+                                    "Parse failed message data: {}",
+                                    std::str::from_utf8(&buffer).unwrap_or("<not-utf8-binary>")
+                                );
+                                Err(MessageStreamSinkError::ParseMessageFailed { source: e })
+                            }
                         }
                     }
                     _ => Err(MessageStreamSinkError::NotBinaryFrame),

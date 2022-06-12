@@ -58,7 +58,7 @@ impl SnRecorder {
 #[derive(Debug)]
 pub(crate) struct EventStreamSender {
     buffer: EventBuffer,
-    event_tx: mpsc::Sender<Result<Event, EventStreamError>>,
+    event_tx: mpsc::Sender<Result<Box<Event>, EventStreamError>>,
     recorder: SnRecorder,
 }
 
