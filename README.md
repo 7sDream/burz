@@ -7,8 +7,9 @@
 ## TODO
 
 - [x] Event buffer and reorder
-- [ ] Filter and Command
+- [x] Filter and Subscriber
 - [ ] All HTTP API wrapper
+- [ ] Commander
 - [ ] Documents
 
 ## LICENSE
